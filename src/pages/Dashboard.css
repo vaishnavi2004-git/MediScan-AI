@@ -1,0 +1,7 @@
+.dashboard-container {
+  padding-top: 60px; /* Space for fixed header */
+}
+
+.hero-section {
+  margin-top: 20px; /* Additional spacing after header */
+}

@@ -1,0 +1,18 @@
+.main-footer {
+  background: #f8fbfd;
+  color: #2176ae;
+  text-align: center;
+  padding: 1.5em 0 1em 0;
+  font-size: 1.1em;
+  border-top: 1px solid #e3eaf2;
+  margin-top: 2em;
+}
+.main-footer a {
+  color: #2176ae;
+  text-decoration: underline;
+  margin: 0 0.5em;
+  font-weight: 500;
+}
+.main-footer a:hover {
+  color: #176093;
+}

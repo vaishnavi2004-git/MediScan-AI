@@ -1,0 +1,603 @@
+import React, { useState, useContext, useRef } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
+import { ReportContext } from '../ReportContext';
+import '../components/ServicePage.css';
+import Tesseract from 'tesseract.js';
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf';
+const medicalImg = '/images/medical-placeholder.png';
+
+export default function AnalysePage() {
+  const navigate = useNavigate();
+  const { setReport } = useContext(ReportContext);
+  const [analysis, setAnalysis] = useState('');
+  const [editText, setEditText] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
+  const [file, setFile] = useState(null);
+  const [ocrResult, setOcrResult] = useState('');
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const fileInput = useRef();
+  const [submitted, setSubmitted] = useState(false);
+
+  // Helper: Run OCR on an image file or dataURL
+  const runOcr = async (image) => {
+    setLoading(true);
+    setOcrResult('');
+    setError('');
+    try {
+      const { data: { text } } = await Tesseract.recognize(image, 'eng');
+      setOcrResult(text);
+      setLoading(false);
+    } catch (err) {
+      setOcrResult('');
+      setError('OCR failed: ' + err.message);
+      setLoading(false);
+    }
+  };
+
+  // Helper: Extract images from PDF and run OCR on each page
+  const processPdf = async (pdfFile) => {
+    setLoading(true);
+    setOcrResult('');
+    setError('');
+    const fileReader = new FileReader();
+    fileReader.onload = async function () {
+      try {
+        const typedarray = new Uint8Array(this.result);
+        const pdf = await pdfjsLib.getDocument({ data: typedarray }).promise;
+        let fullText = '';
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const viewport = page.getViewport({ scale: 1.5 });
+          const canvas = document.createElement('canvas');
+          const context = canvas.getContext('2d');
+          canvas.height = viewport.height;
+          canvas.width = viewport.width;
+          await page.render({ canvasContext: context, viewport }).promise;
+          const dataUrl = canvas.toDataURL('image/png');
+          const { data: { text } } = await Tesseract.recognize(dataUrl, 'eng');
+          fullText += `\n--- Page ${i} ---\n${text}`;
+        }
+        setOcrResult(fullText);
+        setLoading(false);
+      } catch (err) {
+        setOcrResult('');
+        setError('PDF scan failed: ' + err.message);
+        setLoading(false);
+      }
+    };
+    fileReader.readAsArrayBuffer(pdfFile);
+  };
+
+  const handleFileChange = (e) => {
+    const selectedFile = e.target.files[0];
+    setFile(selectedFile);
+    setOcrResult('');
+    setError('');
+    
+    if (selectedFile) {
+      if (selectedFile.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = (e) => runOcr(e.target.result);
+        reader.readAsDataURL(selectedFile);
+      } else if (selectedFile.type === 'application/pdf') {
+        processPdf(selectedFile);
+      } else {
+        setError('Please upload an image or PDF file.');
+      }
+    }
+  };
+
+  const handleSubmitForAnalysis = async () => {
+    setSubmitted(true);
+    setAnalysis('');
+    setSuccess('');
+    setError('');
+    setLoading(true);
+    try {
+      // Prepare enhanced analysis prompt
+      const text = editText || ocrResult;
+      if (!text.trim()) {
+        throw new Error('Please upload a file or enter text first.');
+      }
+      
+      const prompt = `Analyze this medical report and provide:
+
+1. Summary (concise overview of key findings)
+2. Visual Summary (structured metrics with normal ranges)
+3. Risk Assessment (potential health risks and severity)
+4. Trend Analysis (if multiple reports are available)
+5. Personalized Recommendations
+6. Actionable Insights
+7. Glossary of Medical Terms
+
+Medical Report:
+${text}
+
+--- VISUAL SUMMARY ---
+
+[Format metrics as: Name: value [unit] (status, Normal: X-Y)]
+
+--- RISK ASSESSMENT ---
+
+[Identify potential health risks with severity levels]
+
+--- TRENDS ---
+
+[Compare with previous reports if available]
+
+--- RECOMMENDATIONS ---
+
+[Provide specific, actionable recommendations]
+
+--- INSIGHTS ---
+
+[Provide deep insights based on medical knowledge]
+
+--- GLOSSARY ---
+
+[Define key medical terms]`;
+
+      const response = await fetch('http://localhost:5000/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: prompt })
+      });
+      const data = await response.json();
+      
+      if (data.result) {
+        // First, check if we have a valid response
+        const fullResponse = data.result;
+        if (!fullResponse) {
+          throw new Error('No response from AI');
+        }
+
+        // Try to parse the response into sections
+        const sections = fullResponse.split(/--- ([A-Z]+) ---/);
+        
+        // Create a structured object from the sections
+        const analysis = {};
+        for (let i = 1; i < sections.length; i += 2) {
+          const sectionName = sections[i].toLowerCase();
+          const sectionContent = sections[i + 1].trim();
+          analysis[sectionName] = sectionContent;
+        }
+        
+        // Extract specific sections
+        const summary = analysis['summary'] || '';
+        const visualSummary = analysis['visual summary'] || '';
+        
+        // If we don't have both summary and visual summary, try to extract them from the raw response
+        if (!summary || !visualSummary) {
+          // Look for summary section
+          const summaryMatch = fullResponse.match(/SUMMARY(.*?)(?=VISUAL SUMMARY|$)/i);
+          const visualMatch = fullResponse.match(/VISUAL SUMMARY(.*?)(?=RISK ASSESSMENT|$)/i);
+          
+          if (summaryMatch) summary = summaryMatch[1].trim();
+          if (visualMatch) visualSummary = visualMatch[1].trim();
+        }
+        
+        // Process insights and glossary if available
+        const insightsSection = analysis['insights'] || '';
+        const glossarySection = analysis['glossary'] || '';
+        
+        // Process insights
+        const processedInsights = insightsSection.split('\n').filter(l => l.trim()).map(l => l.trim());
+        
+        // Process glossary terms
+        const glossaryTerms = glossarySection.split('\n').filter(l => l.trim());
+        const processedGlossary = glossaryTerms.map(term => {
+          const [termName, definition] = term.split(':').map(s => s.trim());
+          return { name: termName, definition: definition || 'No definition provided' };
+        });
+        
+        // Set enhanced report data in context
+        setReport({
+          summary: summary,
+          insights: processedInsights,
+          glossary: processedGlossary,
+          raw: fullResponse,
+          visualSummary: visualSummary,
+          riskAssessment: analysis['risk assessment'] || '',
+          trends: analysis['trends'] || '',
+          recommendations: analysis['recommendations'] || '',
+          insightsSection: processedInsights
+        });
+
+        // Wait a moment to ensure report is saved
+        await new Promise(resolve => setTimeout(resolve, 200));
+        
+        // Check if we have valid data
+        if (summary && visualSummary) {
+          setSuccess('Analysis complete! Redirecting to summary...');
+          // Wait a moment to show success message
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          navigate('/summary');
+        } else {
+          // Show the full AI response and error message
+          setAnalysis(fullResponse || 'No response from AI');
+          setError('Failed to extract summary and visual summary. Please try again.');
+        }
+      } else {
+        setAnalysis('AI analysis failed: ' + (data.error || 'Unknown error'));
+        // Reset report data on error
+        setReport({
+          summary: '',
+          insights: [],
+          glossary: [],
+          raw: '',
+          visualSummary: '',
+          riskAssessment: '',
+          trends: '',
+          recommendations: '',
+          insightsSection: []
+        });
+      }
+    } catch (err) {
+      setAnalysis('AI analysis failed: ' + err.message);
+    }
+  };
+
+  return (
+    <div className="service-page">
+      <div className="service-container">
+        <div className="service-header">
+          <h1>Analyze Your Medical Report</h1>
+          <p>Upload your medical report and get a comprehensive analysis.</p>
+        </div>
+
+        <div className="service-content">
+          <div className="upload-section">
+            <div className="upload-container" 
+                 onDragOver={(e) => {
+                   e.preventDefault();
+                   setDragActive(true);
+                 }}
+                 onDragLeave={(e) => {
+                   e.preventDefault();
+                   setDragActive(false);
+                 }}
+                 onDrop={(e) => {
+                   e.preventDefault();
+                   setDragActive(false);
+                   const droppedFile = e.dataTransfer.files[0];
+                   if (droppedFile) {
+                     setFile(droppedFile);
+                     if (droppedFile.type.startsWith('image/')) {
+                       const reader = new FileReader();
+                       reader.onload = (e) => runOcr(e.target.result);
+                       reader.readAsDataURL(droppedFile);
+                     } else if (droppedFile.type === 'application/pdf') {
+                       processPdf(droppedFile);
+                     } else {
+                       setError('Please upload an image or PDF file.');
+                     }
+                   }
+                 }}
+            >
+              <div className="upload-content">
+                <input 
+                  type="file" 
+                  ref={fileInput}
+                  onChange={handleFileChange}
+                  accept="image/*,application/pdf"
+                  style={{ display: 'none' }}
+                />
+                <button 
+                  onClick={() => fileInput.current.click()}
+                  className="upload-btn"
+                >
+                  {dragActive ? 'Drop here...' : 'Upload Report'}
+                </button>
+                <p className="upload-text">
+                  {dragActive 
+                    ? 'Drop your file here' 
+                    : 'Drag and drop your medical report here or click to browse'}
+                </p>
+              </div>
+            </div>
+
+            {file && (
+              <div className="preview-section">
+                <h3>Preview:</h3>
+                {file.type.startsWith('image/') ? (
+                  <img 
+                    src={URL.createObjectURL(file)} 
+                    alt="Uploaded"
+                    style={{ maxWidth: '100%', maxHeight: '300px' }}
+                  />
+                ) : (
+                  <div className="pdf-preview">
+                    <p>PDF document uploaded</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="text-section">
+            <h3>Extracted Text:</h3>
+            <textarea
+              value={editText}
+              onChange={(e) => setEditText(e.target.value)}
+              placeholder="Edit the extracted text here..."
+              style={{ width: '100%', minHeight: '200px', padding: '10px' }}
+            />
+          </div>
+
+          <div className="analysis-section">
+            <h3>Analysis:</h3>
+            <div className="analysis-content">
+              {analysis ? (
+                <pre>{analysis}</pre>
+              ) : (
+                <p>No analysis available yet. Click 'Analyze Report' to get started.</p>
+              )}
+            </div>
+          </div>
+
+          <div className="action-buttons">
+            <button 
+              onClick={handleSubmitForAnalysis}
+              disabled={!ocrResult && !editText}
+              className="analyze-btn"
+            >
+              {loading ? 'Analyzing...' : 'Analyze Report'}
+            </button>
+            {error && <div className="error-message">{error}</div>}
+            {success && <div className="success-message">{success}</div>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+--- RISK ASSESSMENT ---
+
+[Identify potential health risks with severity levels]
+
+--- TRENDS ---
+
+[Compare with previous reports if available]
+
+--- RECOMMENDATIONS ---
+
+[Provide specific, actionable recommendations]
+
+--- INSIGHTS ---
+
+[Provide deep insights based on medical knowledge]
+
+--- GLOSSARY ---
+
+[Define key medical terms]`;
+
+      const response = await fetch('http://localhost:5000/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: prompt })
+      });
+      const data = await response.json();
+      
+      if (data.result) {
+        // First, check if we have a valid response
+        const fullResponse = data.result;
+        if (!fullResponse) {
+          throw new Error('No response from AI');
+        }
+
+        // Try to parse the response into sections
+        const sections = fullResponse.split(/--- ([A-Z]+) ---/);
+        
+        // Create a structured object from the sections
+        const analysis = {};
+        for (let i = 1; i < sections.length; i += 2) {
+          const sectionName = sections[i].toLowerCase();
+          const sectionContent = sections[i + 1].trim();
+          analysis[sectionName] = sectionContent;
+        }
+        
+        // Extract specific sections
+        const summary = analysis['summary'] || '';
+        const visualSummary = analysis['visual summary'] || '';
+        
+        // If we don't have both summary and visual summary, try to extract them from the raw response
+        if (!summary || !visualSummary) {
+          // Look for summary section
+          const summaryMatch = fullResponse.match(/SUMMARY(.*?)(?=VISUAL SUMMARY|$)/i);
+          const visualMatch = fullResponse.match(/VISUAL SUMMARY(.*?)(?=RISK ASSESSMENT|$)/i);
+          
+          if (summaryMatch) summary = summaryMatch[1].trim();
+          if (visualMatch) visualSummary = visualMatch[1].trim();
+        }
+        
+        // Process insights and glossary if available
+        const insightsSection = analysis['insights'] || '';
+        const glossarySection = analysis['glossary'] || '';
+        
+        // Process insights
+        const processedInsights = insightsSection.split('\n').filter(l => l.trim()).map(l => l.trim());
+        
+        // Process glossary terms
+        const glossaryTerms = glossarySection.split('\n').filter(l => l.trim());
+        const processedGlossary = glossaryTerms.map(term => {
+          const [termName, definition] = term.split(':').map(s => s.trim());
+          return { name: termName, definition: definition || 'No definition provided' };
+        });
+        
+        // Set enhanced report data in context
+        setReport({
+          summary: summary,
+          insights: processedInsights,
+          glossary: processedGlossary,
+          raw: fullResponse,
+          visualSummary: visualSummary,
+          riskAssessment: analysis['risk assessment'] || '',
+          trends: analysis['trends'] || '',
+          recommendations: analysis['recommendations'] || '',
+          insightsSection: processedInsights
+        });
+        
+        // Save report if logged in
+        const token = localStorage.getItem('token');
+        if (token) {
+          try {
+            await fetch('http://localhost:5000/reports', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+              body: JSON.stringify({ report: fullResponse })
+            });
+          } catch (err) {
+            setError('Failed to save report: ' + err.message);
+          }
+        }
+        
+        // Wait a moment to ensure report is saved
+        await new Promise(resolve => setTimeout(resolve, 200));
+        
+        // Check if we have valid data
+        if (summary && visualSummary) {
+          setSuccess('Analysis complete! Redirecting to summary...');
+          // Wait a moment to show success message
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          navigate('/summary');
+        } else {
+          // Show the full AI response and error message
+          setAnalysis(fullResponse || 'No response from AI');
+          setError('Failed to extract summary and visual summary. Please try again.');
+        }
+      } else {
+        setAnalysis('AI analysis failed: ' + (data.error || 'Unknown error'));
+        // Reset report data on error
+        setReport({
+          summary: '',
+          insights: [],
+          glossary: [],
+          raw: '',
+          visualSummary: '',
+          riskAssessment: '',
+          trends: '',
+          recommendations: '',
+          insightsSection: []
+        });
+      }
+    } catch (err) {
+      setAnalysis('AI analysis failed: ' + err.message);
+    }
+  };
+
+  return (
+    <div className="service-page">
+      <div className="service-container">
+        <div className="service-header">
+          <h1>Analyze Your Medical Report</h1>
+          <p>Upload your medical report and get a comprehensive analysis.</p>
+        </div>
+
+        <div className="service-content">
+          <div className="upload-section">
+            <div className="upload-container" 
+                 onDragOver={(e) => {
+                   e.preventDefault();
+                   setDragActive(true);
+                 }}
+               onDragLeave={(e) => {
+                 e.preventDefault();
+                 setDragActive(false);
+               }}
+               onDrop={(e) => {
+                 e.preventDefault();
+                 setDragActive(false);
+                 const droppedFile = e.dataTransfer.files[0];
+                 if (droppedFile) {
+                   setFile(droppedFile);
+                   if (droppedFile.type.startsWith('image/')) {
+                     const reader = new FileReader();
+                     reader.onload = (e) => runOcr(e.target.result);
+                     reader.readAsDataURL(droppedFile);
+                   } else if (droppedFile.type === 'application/pdf') {
+                     processPdf(droppedFile);
+                   } else {
+                     setError('Please upload an image or PDF file.');
+                   }
+                 }
+               }}
+          >
+            <div className="upload-content">
+              <input 
+                type="file" 
+                ref={fileInput}
+                onChange={handleFileChange}
+                accept="image/*,application/pdf"
+                style={{ display: 'none' }}
+              />
+              <button 
+                onClick={() => fileInput.current.click()}
+                className="upload-btn"
+              >
+                {dragActive ? 'Drop here...' : 'Upload Report'}
+              </button>
+              <p className="upload-text">
+                {dragActive 
+                  ? 'Drop your file here' 
+                  : 'Drag and drop your medical report here or click to browse'}
+              </p>
+            </div>
+          </div>
+
+          {file && (
+            <div className="preview-section">
+              <h3>Preview:</h3>
+              {file.type.startsWith('image/') ? (
+                <img 
+                  src={URL.createObjectURL(file)} 
+                  alt="Uploaded"
+                  style={{ maxWidth: '100%', maxHeight: '300px' }}
+                />
+              ) : (
+                <div className="pdf-preview">
+                  <p>PDF document uploaded</p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="text-section">
+          <h3>Extracted Text:</h3>
+          <textarea
+            value={editText}
+            onChange={handleEdit}
+            placeholder="Edit the extracted text here..."
+            style={{ width: '100%', minHeight: '200px', padding: '10px' }}
+          />
+        </div>
+
+        <div className="analysis-section">
+          <h3>Analysis:</h3>
+          <div className="analysis-content">
+            {analysis ? (
+              <pre>{analysis}</pre>
+            ) : (
+              <p>No analysis available yet. Click 'Analyze Report' to get started.</p>
+            )}
+          </div>
+        </div>
+
+        <div className="action-buttons">
+          <button 
+            onClick={handleSubmitForAnalysis}
+            disabled={!ocrResult && !editText}
+            className="analyze-btn"
+          >
+            {loading ? 'Analyzing...' : 'Analyze Report'}
+          </button>
+          {error && <div className="error-message">{error}</div>}
+          {success && <div className="success-message">{success}</div>}
+        </div>
+      </div>
+    </div>
+  </div>
+);

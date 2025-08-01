@@ -1,0 +1,28 @@
+.hero-section {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3em 2em 2em 2em;
+  background: linear-gradient(90deg,#e3eaf2 60%,#f8fbfd 100%);
+  gap: 3em;
+  flex-wrap: wrap;
+  height: 600px;
+}
+.hero-text {
+  max-width: 420px;
+}
+.hero-text h1 {
+  font-size: 2.3em;
+  color: #2176ae;
+  margin-bottom: 0.5em;
+}
+.hero-text p {
+  font-size: 1.25em;
+  color: #176093;
+  line-height: 1.5;
+}
+.hero-img {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}

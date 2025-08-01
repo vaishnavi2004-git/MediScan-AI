@@ -1,0 +1,22 @@
+.feature-card {
+  transition: box-shadow 0.2s, transform 0.2s;
+}
+.feature-card:hover {
+  box-shadow: 0 4px 20px rgba(33,118,174,0.15);
+  transform: translateY(-7px) scale(1.03);
+}
+.feature-card .cta-btn {
+  background: #2176ae;
+  color: #fff;
+  border: none;
+  padding: 0.7em 1.4em;
+  border-radius: 0.5em;
+  font-size: 1em;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 1em;
+  transition: background 0.2s;
+}
+.feature-card .cta-btn:hover {
+  background: #176093;
+}

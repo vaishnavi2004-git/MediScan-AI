@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="340" height="220" viewBox="0 0 340 220" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect width="340" height="220" rx="30" fill="#e3eaf2"/>
+<ellipse cx="170" cy="120" rx="110" ry="80" fill="#fff"/>
+<g>
+  <rect x="115" y="95" width="110" height="60" rx="14" fill="#2176ae"/>
+  <rect x="125" y="105" width="90" height="40" rx="8" fill="#fff"/>
+  <path d="M130 125 Q140 115 150 135 Q160 155 170 120 Q180 85 190 130 Q200 175 210 120 Q220 65 220 145" stroke="#2176ae" stroke-width="3" fill="none"/>
+  <circle cx="130" cy="125" r="4" fill="#f7b801"/>
+  <circle cx="150" cy="135" r="4" fill="#e74c3c"/>
+  <circle cx="170" cy="120" r="4" fill="#2ecc40"/>
+  <circle cx="190" cy="130" r="4" fill="#2176ae"/>
+  <circle cx="210" cy="120" r="4" fill="#f7b801"/>
+</g>
+<text x="50%" y="200" text-anchor="middle" fill="#2176ae" font-size="22" font-family="Verdana" dy=".3em">AI Health Analyzer</text>
+</svg>
